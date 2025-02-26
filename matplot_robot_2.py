@@ -92,7 +92,7 @@ class RobotPlot:
         self.ax.add_patch(safety_circle)
 
         # Add trajectory line
-        trajectory_line, = self.ax.plot([], [], linestyle="-", color=robot.color, label=f"Robot {len(self.robots_visuals) + 1}")
+        trajectory_line, = self.ax.plot([], [], linestyle="-", color=robot.color)
 
         self.robots_visuals.append((robot, robot_rect, safety_circle, trajectory_line))
         self.ax.legend()
@@ -126,6 +126,7 @@ class RobotSimulation:
         with open(config_file, "r") as file:
             config_data = yaml.safe_load(file)
 
+        print("[] Config_data: {}".format(config_data))
         # Read global robot dimensions
         global_dims = config_data["robot_dim"]
 
