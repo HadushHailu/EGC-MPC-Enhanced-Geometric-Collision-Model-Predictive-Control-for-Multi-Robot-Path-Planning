@@ -11,16 +11,16 @@ robots:
       x: 30.0
       y: 0.0
     color: "blue"
-    max_vel: 1.0  # Robot 1 velocity
+    max_vel: 2.0  # Robot 1 velocity
 
-  - start:
-      x: 30.0
-      y: 0.0  # Changed y-position to 0
-    goal:
-      x: -30.0
-      y: 0.0
-    color: "green"
-    max_vel: 1.0  # Robot 2 moves toward Robot 1
+      # - start:
+      #     x: 30.0
+      #     y: 0.0  # Changed y-position to 0
+      #   goal:
+      #     x: -30.0
+      #     y: 0.0
+      #   color: "green"
+      #   max_vel: 1.0  # Robot 2 moves toward Robot 1
 
   - start:
       x: 30.0

@@ -3,10 +3,155 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Circle
 from matplotlib.animation import FuncAnimation
 import yaml
+import cvxpy as cp
+from scipy.interpolate import CubicSpline
+
 
 dt = 0.1  # Time step
 robot_radius = 1.0  # Assumed robot radius
 safety_buffer = 4.0  # Safety margin around the robot
+
+
+class CubicSplineClass:
+    def __init__(self, path_resolution=0.1):
+        """
+        Initialize the spline generator.
+        
+        Parameters:
+        - path_resolution: Step size for sampling the spline (smaller = smoother path).
+        """
+        self.path_resolution = path_resolution  # How finely the spline is sampled
+
+    def generate_spline(self, global_path):
+        """
+        Generate a cubic spline from the global path.
+        
+        Parameters:
+        - global_path: (x_path, y_path), a list of waypoints from the global planner.
+        
+        Returns:
+        - (smooth_x, smooth_y): Smooth trajectory points from the spline.
+        """
+
+        x_path, y_path = global_path
+        print("[] GENERATE SPLINE: {}".format(x_path))
+
+        # Ensure we have enough points for interpolation
+        if len(x_path) < 3 or len(y_path) < 3:
+            print("[!] Warning: Not enough waypoints for spline interpolation, returning original path.")
+            return np.linspace(x_path[0], x_path[-1], num=5), np.linspace(y_path[0], y_path[-1], num=5)
+
+        # Define time indices for the waypoints
+        t = np.linspace(0, len(x_path) - 1, len(x_path))
+
+        # Create cubic spline functions for x and y
+        spline_x = CubicSpline(t, x_path)
+        spline_y = CubicSpline(t, y_path)
+
+        # Generate new time samples for a smoother path
+        t_smooth = np.arange(0, len(x_path) - 1, self.path_resolution)
+        smooth_x = spline_x(t_smooth)
+        smooth_y = spline_y(t_smooth)
+
+        return smooth_x, smooth_y
+
+class NonLinearMPC:
+    def __init__(self, robot, horizon=10, dt=0.1):
+        """
+        Initialize the NMPC controller.
+        
+        Parameters:
+        - robot: The robot object containing its current state and dynamics.
+        - horizon: Prediction horizon (number of future steps to optimize).
+        - dt: Time step for each NMPC prediction.
+        """
+        self.robot = robot
+        self.horizon = horizon  # Number of future steps to optimize
+        self.dt = dt  # Time step for NMPC
+
+        # Define control limits
+        self.max_vel = robot.max_vel
+        self.max_steering = np.pi / 4  # Max steering angle (±45 degrees)
+        self.max_accel = 1.0  # Max acceleration
+
+    def compute_control(self, spline_path):
+        """Solves the NMPC optimization to find the best velocity and steering angle (theta)."""
+        print("[!] spline_path: {}".format(spline_path))
+
+        # 🔹 Fix: Ensure NMPC gets `horizon + 1` waypoints
+        if len(spline_path[0]) < self.horizon + 1:
+            print("[!] Warning: Not enough waypoints for NMPC, increasing resolution.")
+            extra_x = np.linspace(spline_path[0][0], spline_path[0][-1], num=self.horizon + 1)
+            extra_y = np.linspace(spline_path[1][0], spline_path[1][-1], num=self.horizon + 1)
+            spline_path = (extra_x, extra_y)
+
+        x_ref = np.array(spline_path[0][: self.horizon + 1]).reshape(-1, 1)  # 🔹 Fix: Column vector
+        y_ref = np.array(spline_path[1][: self.horizon + 1]).reshape(-1, 1)  # 🔹 Fix: Column vector
+
+        # 🔹 Fix: Ensure valid size before solving NMPC
+        if len(x_ref) != self.horizon + 1 or len(y_ref) != self.horizon + 1:
+            print("[!] Error: x_ref and y_ref do not match horizon length!")
+            return 0, self.robot.theta  # Stop robot if data is incorrect
+
+        # Extract current position
+        x0, y0 = self.robot.get_position()
+        theta0 = self.robot.theta
+        v0 = self.robot.velocity  # Current velocity
+
+        # Decision Variables (for each step in the horizon)
+        x = cp.Variable((self.horizon + 1, 1))  # X positions
+        y = cp.Variable((self.horizon + 1, 1))  # Y positions
+        theta = cp.Variable((self.horizon + 1, 1))  # Orientations
+        v = cp.Variable((self.horizon, 1))  # Velocities
+        steering = cp.Variable((self.horizon, 1))  # Steering angles
+
+        # Constraints and Cost Function
+        constraints = []
+        cost = 0
+
+        # Define weight matrices
+        Q = np.eye(self.horizon + 1)  # Weight matrix for tracking error
+        R = 0.1 * np.eye(self.horizon)  # Weight matrix for control effort
+
+        # Initial conditions
+        constraints += [x[0] == x0, y[0] == y0, theta[0] == theta0]
+
+        for t in range(self.horizon):
+            # Cost Function: Minimize tracking error and control effort
+            cost += cp.quad_form(x - x_ref, Q)  # 🔹 Fix: Use proper matrix form
+            cost += cp.quad_form(y - y_ref, Q)  # 🔹 Fix: Use proper matrix form
+            cost += cp.quad_form(steering, R)  # Minimize steering effort
+            cost += cp.quad_form(v - v0, R)  # Minimize acceleration effort
+
+            # 🔹 Fix: Linearize cos(theta) and sin(theta)
+            constraints += [
+                x[t + 1] == x[t] + v[t] * (1 - theta[t]**2 / 2) * self.dt,  # Approximate cos(theta)
+                y[t + 1] == y[t] + v[t] * theta[t] * self.dt,  # Approximate sin(theta)
+                theta[t + 1] == theta[t] + (v[t] / self.robot.length) * steering[t] * self.dt,  # Linearized
+            ]
+
+            # Control constraints
+            constraints += [
+                v[t] <= self.max_vel,
+                v[t] >= -self.max_vel,  # Allow reversing
+                steering[t] <= self.max_steering,
+                steering[t] >= -self.max_steering,
+            ]
+
+        # Solve the optimization problem
+        problem = cp.Problem(cp.Minimize(cost), constraints)
+        problem.solve(solver=cp.OSQP, verbose=False)
+
+        if problem.status != cp.OPTIMAL:
+            print("[!] NMPC Failed to find an optimal solution. Stopping robot.")
+            return 0, self.robot.theta  # If solver fails, stop robot
+
+        # Extract optimal velocity and steering angle for the first time step
+        optimal_velocity = v.value[0, 0]
+        optimal_steering = steering.value[0, 0]
+
+        return optimal_velocity, optimal_steering
+
 
 class Robot:
     def __init__(self, config, global_dims):
@@ -30,27 +175,31 @@ class Robot:
 
         # Collision Avoidance & Path Planning
         self.avoidance_system = None
-        self.controller = ControllerClass(self)  
-        self.global_path = ([], [])  # Store the global path for visualization
+        self.spline_generator = CubicSplineClass()  # Spline generator
+        self.mpc = NonLinearMPC(self)  # NMPC Controller
+        self.spline_path = ([], [])  # Store the smooth spline path
 
     def update_total_robots(self, all_robots):
         """Assign the Collision Avoidance System after all robots are created."""
         self.avoidance_system = CollisionAvoidanceClass(all_robots)
 
     def update(self):
-        """Move the robot forward using computed velocity and angular velocity."""
+        """Move the robot forward using NMPC-based velocity and theta."""
         if self.avoidance_system is None:
             return  
 
-        # Compute the global path dynamically at each step
-        self.global_path = self.avoidance_system.find_global_path(self)  # Store the path
+        # Compute the global path dynamically
+        global_path = self.avoidance_system.find_global_path(self)  
 
-        # Compute velocity and angular velocity using the latest path
-        self.velocity, self.theta = self.controller.compute_control(self.global_path)
+        # Convert the global path to a smooth spline
+        self.spline_path = self.spline_generator.generate_spline(global_path)
 
-        print("[] global_path: {} velcity: {}".format(self.global_path, self.velocity))
+        # Compute velocity and theta using NMPC
+        self.velocity, self.theta = self.mpc.compute_control(self.spline_path)
 
-         # Update position using velocity and new orientation
+        print("[] NMPC Path: {} Velocity: {}".format(self.spline_path, self.velocity))
+
+        # Update position using velocity and new orientation
         self.position[0] += self.velocity * np.cos(self.theta) * dt
         self.position[1] += self.velocity * np.sin(self.theta) * dt
 
@@ -88,7 +237,7 @@ class CollisionAvoidanceClass:
         DCPA = np.linalg.norm(closest_point_robot - closest_point_obstacle)
         collision_distance = robot_radius + safety_buffer
         print("     [$] DCPA: {} TCPA: {}".format(DCPA, TCPA))
-        return DCPA <= collision_distance and 0 < TCPA < 15
+        return DCPA <= collision_distance and 0 < TCPA < 10
 
     def compute_tangents(self, robot_pos, obstacle_pos, radius_with_buffer):
         x_p, y_p = robot_pos
@@ -139,8 +288,8 @@ class CollisionAvoidanceClass:
                 path_length1 = np.linalg.norm(np.array(current_pos) - np.array(tangent1)) + np.linalg.norm(np.array(tangent1) - np.array(goal_pos))
                 path_length2 = np.linalg.norm(np.array(current_pos) - np.array(tangent2)) + np.linalg.norm(np.array(tangent2) - np.array(goal_pos))
                 selected_tangent = tangent1 if path_length1 < path_length2 else tangent2
-                full_path_x.append(selected_tangent[0]*1.3)
-                full_path_y.append(selected_tangent[1]*1.3)
+                full_path_x.append(selected_tangent[0])
+                full_path_y.append(selected_tangent[1])
                 current_pos = selected_tangent
             else:
                 break
@@ -148,53 +297,17 @@ class CollisionAvoidanceClass:
             obstacles.pop(nearest_idx)
             obstacle_velocities.pop(nearest_idx)
 
+
+        mid_x = (full_path_x[-1] + goal_pos[0]) / 2
+        mid_y = (full_path_y[-1] + goal_pos[1]) / 2
+        full_path_x.append(mid_x)
+        full_path_y.append(mid_y)
+
         full_path_x.append(goal_pos[0])
         full_path_y.append(goal_pos[1])
+
+        print("[] FIND GLOBAL PATh: {}".format(full_path_x))
         return full_path_x, full_path_y
-
-
-class ControllerClass:
-    def __init__(self, robot):
-        """Initialize the controller."""
-        self.robot = robot
-
-    def compute_control(self, global_path):
-        """Compute the velocity and theta needed to move toward the first waypoint in the global path."""
-        if not global_path[0]:  # If the global path is empty
-            return 0, self.robot.theta  # Stop and maintain current orientation
-
-        # Get the first waypoint from the global path
-        target_x = global_path[0][1]
-        target_y = global_path[1][1]
-        current_x, current_y = self.robot.get_position()
-
-        # Compute the desired theta to the first waypoint
-        theta = np.arctan2(target_y - current_y, target_x - current_x)
-
-        # Compute the angle difference between the current direction and target direction
-        angle_diff = np.arctan2(np.sin(theta - self.robot.theta), np.cos(theta - self.robot.theta))
-
-        # Compute distance to the first waypoint
-        distance = np.linalg.norm([target_x - current_x, target_y - current_y])
-
-        # Determine velocity based on the angle difference
-        if abs(angle_diff) > np.pi / 2:  # If angle difference is greater than 90 degrees
-            velocity = -self.robot.max_vel  # Move backward
-            theta += np.pi  # Adjust theta to face the opposite direction
-        else:
-            velocity = self.robot.max_vel  # Move forward
-
-        # Normalize theta to keep it within [-π, π]
-        theta = np.arctan2(np.sin(theta), np.cos(theta))
-
-        # Stop if very close to the waypoint
-        if distance < 0.5:
-            velocity = 0  
-
-        return velocity, theta  # Return velocity and required theta
-
-
-
 
 class RobotPlot:
     def __init__(self):
@@ -272,7 +385,7 @@ class RobotPlot:
             trajectory_line.set_data(x_traj, y_traj)
 
             # Update global path visualization
-            x_path, y_path = robot.global_path
+            x_path, y_path  = robot.spline_path
             global_path_line.set_data(x_path, y_path)
 
             # Update waypoints
@@ -281,8 +394,6 @@ class RobotPlot:
             updated_elements.extend([robot_rect, safety_circle, trajectory_line, global_path_line, waypoint_scatter])
 
         return updated_elements
-
-
 
 
 class RobotSimulation:
@@ -314,7 +425,6 @@ class RobotSimulation:
 
     def update(self, frame):
         """Update function for the animation."""
-        print("[+] ======== Robot Simulation ======")
         for robot in self.robots:
             robot.update()
         return self.plot.update_plot()
