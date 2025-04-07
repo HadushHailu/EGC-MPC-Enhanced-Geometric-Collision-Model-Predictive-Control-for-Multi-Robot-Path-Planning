@@ -4,7 +4,7 @@ from matplotlib.patches import Rectangle, Circle
 from matplotlib.animation import FuncAnimation
 import yaml
 
-dt = 0.1  # Time step
+dt = 0.075  # Time step
 robot_radius = 1.0  # Assumed robot radius
 safety_buffer = 4.0  # Safety margin around the robot
 
@@ -72,23 +72,44 @@ class CollisionAvoidanceClass:
     def __init__(self, robots):
         self.robots = robots
 
-    def collision_prediction(self, robot_pos, robot_vel, obstacle_pos, obstacle_vel):
+    def collision_prediction(self, robot_pos, goal_pos, max_vel, obstacle_pos, obstacle_vel):
+        """
+        Predicts if a collision will occur between the robot and an obstacle based on motion dynamics.
+        The robot's velocity is computed from its current position, goal position, and max velocity.
+        """
+        # Compute the robot's velocity vector towards the goal
+        direction = np.array(goal_pos) - np.array(robot_pos)
+        direction_norm = np.linalg.norm(direction)
+        
+        if direction_norm == 0:
+            robot_vel = np.array([0, 0])
+        else:
+            robot_vel = (direction / direction_norm) * max_vel
+
         rel_pos = np.array([obstacle_pos[0] - robot_pos[0], obstacle_pos[1] - robot_pos[1]])
         rel_vel = np.array([obstacle_vel[0] - robot_vel[0], obstacle_vel[1] - robot_vel[1]])
         print("         [] POS: obstacles: {} {} robot: {} {}".format(obstacle_pos[0], obstacle_pos[1], robot_pos[0], robot_pos[1]))
         print("         [] VEL: obstacles: {} {} robot: {} {}".format(obstacle_vel[0], obstacle_vel[1], robot_vel[0], robot_vel[1]))
         print("         [] rel_vel: {}".format(rel_vel))
+        
         rel_speed_sq = np.dot(rel_vel, rel_vel)
         if rel_speed_sq == 0:
             print("         [] Returning false")
-            return False
+            return 0, False
+        
         TCPA = -np.dot(rel_pos, rel_vel) / rel_speed_sq
-        closest_point_robot = np.array(robot_pos) + np.array(robot_vel) * TCPA
-        closest_point_obstacle = np.array(obstacle_pos) + np.array(obstacle_vel) * TCPA
+        closest_point_robot = np.array(robot_pos) + robot_vel * TCPA
+        closest_point_obstacle = np.array(obstacle_pos) + obstacle_vel * TCPA
         DCPA = np.linalg.norm(closest_point_robot - closest_point_obstacle)
-        collision_distance = robot_radius + safety_buffer
-        print("     [$] DCPA: {} TCPA: {}".format(DCPA, TCPA))
-        return DCPA <= collision_distance and 0 < TCPA < 15
+        
+        collision_distance = 3 * robot_radius + safety_buffer
+        print("     [$] DCPA: {} TCPA: {} collision_distance: {}".format(DCPA, TCPA, collision_distance))
+        
+        if DCPA <= collision_distance and 0 < TCPA < 15:
+            return DCPA, True
+        else:
+            return 0, False
+
 
     def compute_tangents(self, robot_pos, obstacle_pos, radius_with_buffer):
         x_p, y_p = robot_pos
@@ -109,6 +130,51 @@ class CollisionAvoidanceClass:
         y_s2 = y_p + M * np.sin(alpha + theta)
         return (x_s1, y_s1), (x_s2, y_s2)
 
+
+    def straight_to_goal_safe_tangent_segments(self, robot, tangent1, tangent2, width):
+        """
+        Check if the straight-line path from the robot to its goal intersects a rectangle
+        bounded by the tangents with a given width.
+        """
+        def ccw(A, B, C):
+            """Check if three points are in counter-clockwise order."""
+            return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+
+        def segments_intersect(A, B, C, D):
+            """Check if segment AB intersects with segment CD."""
+            return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+
+        def get_rectangle_corners(A, B, width):
+            """Compute the four corners of the rectangle centered on segment AB with given width."""
+            AB = np.array(B) - np.array(A)
+            AB_unit = AB / np.linalg.norm(AB)
+            perp = np.array([-AB_unit[1], AB_unit[0]]) * (width / 2)
+            
+            return [A + perp, B + perp, B - perp, A - perp]
+
+        def rectangle_intersects_line(rect_corners, P1, P2):
+            """Check if a line segment intersects any of the rectangle edges."""
+            edges = [
+                (rect_corners[0], rect_corners[1]),
+                (rect_corners[1], rect_corners[2]),
+                (rect_corners[2], rect_corners[3]),
+                (rect_corners[3], rect_corners[0])
+            ]
+            return any(segments_intersect(P1, P2, edge[0], edge[1]) for edge in edges)
+
+        # Define the robot's straight-line path to the goal
+        robot_pos = robot.get_position()
+        goal_pos = robot.goal_position
+
+        # Compute the rectangle around the tangent segment
+        rectangle_corners = get_rectangle_corners(tangent1, tangent2, width)
+
+        # Check if the robot's straight path to the goal intersects the rectangle
+        return rectangle_intersects_line(rectangle_corners, robot_pos, goal_pos)
+
+
+
+    
     def find_global_path(self, robot):
         robot_pos = robot.get_position()
         goal_pos = robot.goal_position
@@ -128,20 +194,30 @@ class CollisionAvoidanceClass:
             nearest_velocity = obstacle_velocities[nearest_idx]
             print("     [#] nearest_velocity: {}".format(nearest_velocity))
 
-            collision = self.collision_prediction(
-                current_pos, robot.get_velocity(), nearest_obstacle, nearest_velocity
+            dcpa, collision = self.collision_prediction(
+                current_pos, goal_pos, robot.max_vel, nearest_obstacle, nearest_velocity
             )
             print("     [] collision: {}".format(collision))
 
             if collision:
                 tangent1, tangent2 = self.compute_tangents(current_pos, nearest_obstacle, robot_radius + safety_buffer)
-                tangent_points.extend([tangent1, tangent2])
-                path_length1 = np.linalg.norm(np.array(current_pos) - np.array(tangent1)) + np.linalg.norm(np.array(tangent1) - np.array(goal_pos))
-                path_length2 = np.linalg.norm(np.array(current_pos) - np.array(tangent2)) + np.linalg.norm(np.array(tangent2) - np.array(goal_pos))
-                selected_tangent = tangent1 if path_length1 < path_length2 else tangent2
-                full_path_x.append(selected_tangent[0]*1.3)
-                full_path_y.append(selected_tangent[1]*1.3)
-                current_pos = selected_tangent
+                # check if the straight line to the goal does hit the segment bounded by tangent1 and tangent2
+
+                if self.straight_to_goal_safe_tangent_segments(robot, tangent1, tangent2, 2):
+                    print("     [$$$] Straight to goal doesn't intersect with tangent segments")
+                    pass
+                else:
+                    # If it doesn not, just leave this step, else do the tangent selection and add as a waypoint
+                    tangent_points.extend([tangent1, tangent2])
+                    path_length1 = np.linalg.norm(np.array(current_pos) - np.array(tangent1)) + np.linalg.norm(np.array(tangent1) - np.array(goal_pos))
+                    path_length2 = np.linalg.norm(np.array(current_pos) - np.array(tangent2)) + np.linalg.norm(np.array(tangent2) - np.array(goal_pos))
+                    selected_tangent = tangent1 if path_length1 < path_length2 else tangent2
+                    if np.sqrt((current_pos[0] - selected_tangent[0])**2 - (current_pos[1] - selected_tangent[1])**2) < 1:
+                        pass
+                    else:
+                        full_path_x.append(selected_tangent[0]*1.1)
+                        full_path_y.append(selected_tangent[1]*1.1)
+                        current_pos = selected_tangent
             else:
                 break
 
@@ -150,6 +226,7 @@ class CollisionAvoidanceClass:
 
         full_path_x.append(goal_pos[0])
         full_path_y.append(goal_pos[1])
+        print(" [] full_path: {} {}".format(full_path_x, full_path_y))
         return full_path_x, full_path_y
 
 
@@ -327,5 +404,6 @@ class RobotSimulation:
 
 # Run the simulation
 if __name__ == "__main__":
+    print("robot simulation")
     simulation = RobotSimulation()
     simulation.run()
