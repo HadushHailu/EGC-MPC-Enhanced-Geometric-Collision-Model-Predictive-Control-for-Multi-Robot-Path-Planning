@@ -1,7 +1,7 @@
 robot_dim:
   length: 4.0
   width: 2.0
-  safety_margin: 3.0  # Global safety margin (radius)
+  safety_margin: 3.0  # Radius for the safety circle
 
 robots:
   - start:
@@ -11,24 +11,15 @@ robots:
       x: 30.0
       y: 0.0
     color: "blue"
-    max_vel: 2.0  # Robot 1 velocity
-
-      # - start:
-      #     x: 30.0
-      #     y: 0.0  # Changed y-position to 0
-      #   goal:
-      #     x: -30.0
-      #     y: 0.0
-      #   color: "green"
-      #   max_vel: 1.0  # Robot 2 moves toward Robot 1
+    max_vel: 2.0
+    controller_frequency: 10  # Hz
 
   - start:
       x: 30.0
-      y: 10.0  # Changed y-position to 0
+      y: 10.0
     goal:
       x: -20.0
       y: -20.0
     color: "red"
-    max_vel: 1.0  # Robot 2 moves toward Robot 1
-
-
+    max_vel: 1.0
+    controller_frequency: 5  # Hz
