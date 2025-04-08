@@ -22,4 +22,35 @@ robots:
       y: -20.0
     color: "red"
     max_vel: 1.0
+    controller_frequency: 1  # Hz
+
+  - start:
+      x: -25.0
+      y: 10.0
+    goal:
+      x: 25.0
+      y: -10.0
+    color: "green"
+    max_vel: 1.5
     controller_frequency: 5  # Hz
+
+  - start:
+      x: 0.0
+      y: 30.0
+    goal:
+      x: 0.0
+      y: -30.0
+    color: "orange"
+    max_vel: 1.2
+    controller_frequency: 8  # Hz
+
+  - start:
+      x: -20.0
+      y: -20.0
+    goal:
+      x: 20.0
+      y: 20.0
+    color: "purple"
+    max_vel: 1.8
+    controller_frequency: 6  # Hz
+

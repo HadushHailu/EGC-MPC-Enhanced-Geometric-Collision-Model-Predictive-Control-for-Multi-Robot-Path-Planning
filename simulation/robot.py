@@ -27,7 +27,7 @@ class Robot(threading.Thread):
         self.y_traj = [self.position[1]]
         
         self.controller = Controller(self)
-        self.avoidance = CollisionAvoidance()
+        self.avoidance = CollisionAvoidance(robot_id)
 
     def run(self):
         rate = Rate(self.controller_frequency)
