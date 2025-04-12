@@ -3,7 +3,7 @@
 import threading
 import numpy as np
 from simulation.rate import Rate
-from simulation.controller import Controller
+from simulation.mpc_controller import MPCController
 from simulation.avoidance import CollisionAvoidance
 from simulation.path_smoother import PathSmoother
 
@@ -27,9 +27,12 @@ class Robot(threading.Thread):
         self.x_traj = [self.position[0]]
         self.y_traj = [self.position[1]]
         
-        self.controller = Controller(self)
+        self.controller = MPCController(self.safety_margin)
         self.avoidance = CollisionAvoidance(robot_id)
         self.pathSmoother = PathSmoother()
+
+    def get_state(self):
+        return self.position[0], self.position[1], self.theta
 
     def run(self):
         rate = Rate(self.controller_frequency)
@@ -39,14 +42,14 @@ class Robot(threading.Thread):
             # Plan path and compute control
             global_path = self.avoidance.plan(self, other_robots)
             global_path = self.pathSmoother.smooth(global_path[0], global_path[1])
-            velocity, theta = self.controller.compute(global_path)
+            velocity, theta = self.controller.get_control(self.get_state(), global_path[0], global_path[1], other_robots)
 
             # Update position
             dt = 1.0 / self.controller_frequency
             self.position[0] += velocity * np.cos(theta) * dt
             self.position[1] += velocity * np.sin(theta) * dt
             self.velocity = np.array([velocity * np.cos(theta), velocity * np.sin(theta)])
-            self.theta = theta
+            self.theta += theta * dt
 
             # Update trajectory
             self.x_traj.append(self.position[0])

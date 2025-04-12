@@ -2,31 +2,33 @@ import numpy as np
 from scipy.interpolate import CubicSpline
 
 class PathSmoother:
-    def __init__(self, resolution=0.4):
-        self.resolution = resolution  # spacing between interpolated points
+    def __init__(self, num_points=500):
+        self.num_points = num_points  # Number of interpolated points
 
-    def smooth(self, path_x, path_y):
-        if len(path_x) < 2:
-            return path_x, path_y
+    def smooth(self, path):
+        """
+        Smooths a path using cubic splines.
 
-        # Use arc-length parameterization
-        points = np.array(list(zip(path_x, path_y)))
-        distances = np.sqrt(np.sum(np.diff(points, axis=0) ** 2, axis=1))
-        t = np.insert(np.cumsum(distances), 0, 0)
+        Parameters:
+            path (List[Tuple[float, float]]): The input path as (x, y) points.
 
-        # Normalize t to [0, 1]
-        t /= t[-1]
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: The smoothed path (x_smooth, y_smooth).
+        """
+        if len(path) < 3:
+            x_path, y_path = zip(*path)
+            return np.array(x_path), np.array(y_path)  # Not enough points to smooth
 
-        # Cubic splines for x(t) and y(t)
-        cs_x = CubicSpline(t, path_x)
-        cs_y = CubicSpline(t, path_y)
+        path = np.array(path)
+        x_path = path[:, 0]
+        y_path = path[:, 1]
 
-        # Combine original t with interpolated values to preserve all waypoints
-        t_interp = np.linspace(0, 1, int(1 / self.resolution * len(path_x)))
-        t_combined = np.union1d(t, t_interp)  # ensures original points are included
+        t = np.linspace(0, 1, len(x_path))
+        t_smooth = np.linspace(0, 1, self.num_points)
+        spline_x = CubicSpline(t, x_path)
+        spline_y = CubicSpline(t, y_path)
 
-        # Evaluate smoothed path
-        smooth_x = cs_x(t_combined)
-        smooth_y = cs_y(t_combined)
+        x_smooth = spline_x(t_smooth)
+        y_smooth = spline_y(t_smooth)
 
-        return smooth_x.tolist(), smooth_y.tolist()
+        return list(zip(x_smooth, y_smooth))

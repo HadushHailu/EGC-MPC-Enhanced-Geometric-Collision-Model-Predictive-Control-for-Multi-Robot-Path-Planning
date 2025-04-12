@@ -5,6 +5,16 @@ from simulation.egc_mpc_simulation import EgcMpcSimulation
 import threading
 import signal
 import sys
+import logging
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="[%(asctime)s] [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("avoidance_debug.log"),
+        logging.StreamHandler()
+    ]
+)
 
 stop_event = threading.Event()
 
