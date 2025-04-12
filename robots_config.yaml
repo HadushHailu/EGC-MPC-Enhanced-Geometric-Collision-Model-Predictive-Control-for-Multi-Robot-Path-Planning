@@ -4,53 +4,46 @@ robot_dim:
   safety_margin: 3.0  # Radius for the safety circle
 
 robots:
+  # East → West
   - start:
-      x: -30.0
+      x: 30.0
       y: 0.0
     goal:
-      x: 30.0
+      x: -30.0
       y: 0.0
     color: "blue"
     max_vel: 2.0
-    controller_frequency: 10  # Hz
+    controller_frequency: 2
 
-  - start:
-      x: 30.0
-      y: 10.0
-    goal:
-      x: -20.0
-      y: -20.0
-    color: "red"
-    max_vel: 1.0
-    controller_frequency: 1  # Hz
-
-  - start:
-      x: -25.0
-      y: 10.0
-    goal:
-      x: 25.0
-      y: -10.0
-    color: "green"
-    max_vel: 1.5
-    controller_frequency: 5  # Hz
-
+  # North → South
   - start:
       x: 0.0
       y: 30.0
     goal:
       x: 0.0
       y: -30.0
-    color: "orange"
-    max_vel: 1.2
-    controller_frequency: 8  # Hz
+    color: "red"
+    max_vel: 2.0
+    controller_frequency: 2
 
+  # West → East
   - start:
-      x: -20.0
-      y: -20.0
+      x: -30.0
+      y: 0.0
     goal:
-      x: 20.0
-      y: 20.0
-    color: "purple"
-    max_vel: 1.8
-    controller_frequency: 6  # Hz
+      x: 30.0
+      y: 0.0
+    color: "green"
+    max_vel: 2.0
+    controller_frequency: 2
 
+  # South → North
+  - start:
+      x: 0.0
+      y: -30.0
+    goal:
+      x: 0.0
+      y: 30.0
+    color: "orange"
+    max_vel: 2.0
+    controller_frequency: 2

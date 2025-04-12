@@ -16,6 +16,7 @@ logging.basicConfig(
 robot_radius = 1.0
 safety_buffer = 4.0
 
+
 class CollisionAvoidance:
     def __init__(self,robot_id=None):
         self.logger = logging.getLogger(f"avoidance.{robot_id or 'generic'}")
@@ -30,27 +31,40 @@ class CollisionAvoidance:
         else:
             robot_vel = (direction / direction_norm) * max_vel
 
-        rel_pos = np.array([obstacle_pos[0] - robot_pos[0], obstacle_pos[1] - robot_pos[1]])
-        rel_vel = np.array([obstacle_vel[0] - robot_vel[0], obstacle_vel[1] - robot_vel[1]])
+        rel_pos = np.array(obstacle_pos) - np.array(robot_pos)
+        rel_vel = obstacle_vel - robot_vel
 
         rel_speed_sq = np.dot(rel_vel, rel_vel)
         if rel_speed_sq == 0:
-            return 0, False
+            return 0, float("inf"), False
 
         TCPA = -np.dot(rel_pos, rel_vel) / rel_speed_sq
         closest_point_robot = np.array(robot_pos) + robot_vel * TCPA
         closest_point_obstacle = np.array(obstacle_pos) + obstacle_vel * TCPA
         DCPA = np.linalg.norm(closest_point_robot - closest_point_obstacle)
 
-        collision_distance = 3 * robot_radius + safety_buffer
+        collision_distance = 5 * robot_radius + safety_buffer
+        will_collide = DCPA <= collision_distance and 0 < TCPA < 15
 
-        self.logger.info(f"[COLLISION] Checking: robot @ {robot_pos}, obstacle @ {obstacle_pos}")
-        self.logger.info(f"→ rel_vel={rel_vel}, TCPA={TCPA:.2f}, DCPA={DCPA:.2f}, result={'YES' if DCPA <= collision_distance and 0 < TCPA < 15 else 'NO'}")
+        self.logger.info(
+            f"[COLLISION] Checking: robot @ {robot_pos}, obstacle @ {obstacle_pos}"
+        )
+        self.logger.info(
+            f"→ rel_vel={rel_vel}, TCPA={TCPA:.2f}, DCPA={DCPA:.2f}, result={'YES' if will_collide else 'NO'}"
+        )
 
-        if DCPA <= collision_distance and 0 < TCPA < 15:
-            return DCPA, True
-        else:
-            return 0, False
+        return DCPA, TCPA, will_collide
+
+    def filter_and_rank_obstacles_by_tcpa(self, robot_pos, goal_pos, max_vel, obstacles, velocities):
+        ranked_threats = []
+
+        for idx, (obs, vel) in enumerate(zip(obstacles, velocities)):
+            dcpa, tcpa, collision = self.collision_prediction(robot_pos, goal_pos, max_vel, obs, vel)
+            if collision:
+                ranked_threats.append((idx, obs, vel, tcpa))
+
+        ranked_threats.sort(key=lambda tup: tup[3])  # sort by TCPA
+        return ranked_threats
 
     def compute_tangents(self, robot_pos, obstacle_pos, radius_with_buffer):
         x_p, y_p = robot_pos
@@ -373,7 +387,8 @@ class CollisionAvoidance:
 
         # Handle degenerate case: A ≈ 0 (line nearly tangent to cone or flat)
         if abs(A) < epsilon:
-            return intersections
+            self.logger.warning(f"[INTERSECT] Near-degenerate case (A≈0). Perturbing slope slightly.")
+            A += epsilon  # Avoid full degeneracy and still solve the quadratic
 
         discriminant = B**2 - 4 * A * C
         if discriminant < 0:
@@ -403,41 +418,43 @@ class CollisionAvoidance:
         full_path_y = [current_pos[1]]
         tangent_points = []
 
-        while obstacles:
-            nearest_idx = np.argmin([np.linalg.norm(np.array(obs) - np.array(current_pos)) for obs in obstacles])
-            nearest_obstacle = obstacles[nearest_idx]
-            nearest_velocity = obstacle_velocities[nearest_idx]
+        # Step 1: Filter obstacles that will cause collision and sort by TCPA
+        ranked_threats = self.filter_and_rank_obstacles_by_tcpa(
+            robot_pos=current_pos,
+            goal_pos=goal_pos,
+            max_vel=robot.max_vel,
+            obstacles=obstacles,
+            velocities=obstacle_velocities
+        )
 
-            dcpa, collision = self.collision_prediction(
-                current_pos, goal_pos, robot.max_vel, nearest_obstacle, nearest_velocity
+        # Step 2: Process each ranked obstacle and evaluate avoidance
+        for idx, nearest_obstacle, nearest_velocity, tcpa in ranked_threats:
+            tangent1, tangent2 = self.compute_tangents(current_pos, nearest_obstacle, robot_radius + safety_buffer)
+            tangent_points.extend([tangent1, tangent2])
+
+            via_points = self.compute_velocity_based_viapoints(
+                robot_pos=current_pos,
+                goal_pos=goal_pos,
+                obstacle_pos=nearest_obstacle,
+                obstacle_velocity=nearest_velocity,
+                tangent_points=[tangent1, tangent2],
+                cone_slope=robot.max_vel
             )
 
-            if collision:
-                tangent1, tangent2 = self.compute_tangents(current_pos, nearest_obstacle, robot_radius + safety_buffer)
-                tangent_points.extend([tangent1, tangent2])
-                via_points = self.compute_velocity_based_viapoints(
-                    robot_pos=current_pos,
-                    goal_pos=goal_pos,
-                    obstacle_pos=nearest_obstacle,
-                    obstacle_velocity=nearest_velocity,
-                    tangent_points=[tangent1, tangent2],
-                    cone_slope=robot.max_vel
-                )
-
-                selected_viapoint = self.evaluate_viapoints(via_points, goal_pos, robot.max_vel)
-                if selected_viapoint is not None and np.linalg.norm(np.array(current_pos) - np.array(selected_viapoint)) >= 1.0:
-                    full_path_x.append(selected_viapoint[0])
-                    full_path_y.append(selected_viapoint[1])
-                    current_pos = selected_viapoint
-                else:
-                    self.logger.info("[AVOIDANCE] No valid via point selected — skipping waypoint update.")
-
+            selected_viapoint = self.evaluate_viapoints(via_points, goal_pos, robot.max_vel)
+            
+            if selected_viapoint is not None and np.linalg.norm(np.array(current_pos) - np.array(selected_viapoint)) >= 1.0:
+                full_path_x.append(selected_viapoint[0])
+                full_path_y.append(selected_viapoint[1])
+                current_pos = selected_viapoint
             else:
-                break
+                self.logger.info("[AVOIDANCE] No valid via point selected for obstacle — checking next threat.")
 
-            obstacles.pop(nearest_idx)
-            obstacle_velocities.pop(nearest_idx)
-
+        # Step 3: Append goal position
         full_path_x.append(goal_pos[0])
         full_path_y.append(goal_pos[1])
+        full_path = list(zip(full_path_x, full_path_y))
+        self.logger.info(f"[PATH] Robot {robot.robot_id}: planned path with {len(full_path)} points → {full_path}")
+
+
         return full_path_x, full_path_y
