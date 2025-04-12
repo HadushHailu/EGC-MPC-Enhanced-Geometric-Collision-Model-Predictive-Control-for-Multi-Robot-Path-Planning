@@ -5,6 +5,7 @@ import numpy as np
 from simulation.rate import Rate
 from simulation.controller import Controller
 from simulation.avoidance import CollisionAvoidance
+from simulation.path_smoother import PathSmoother
 
 class Robot(threading.Thread):
     def __init__(self, robot_id, config, robot_dim, robot_states, stop_event):
@@ -28,6 +29,7 @@ class Robot(threading.Thread):
         
         self.controller = Controller(self)
         self.avoidance = CollisionAvoidance(robot_id)
+        self.pathSmoother = PathSmoother()
 
     def run(self):
         rate = Rate(self.controller_frequency)
@@ -36,6 +38,7 @@ class Robot(threading.Thread):
 
             # Plan path and compute control
             global_path = self.avoidance.plan(self, other_robots)
+            global_path = self.pathSmoother.smooth(global_path[0], global_path[1])
             velocity, theta = self.controller.compute(global_path)
 
             # Update position
