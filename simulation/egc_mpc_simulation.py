@@ -4,6 +4,15 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Circle
 from matplotlib.animation import FuncAnimation
 import numpy as np
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("avoidance_debug.log"),
+        logging.StreamHandler()
+    ]
+)
 
 class EgcMpcSimulation:
     def __init__(self, robot_states, config, stop_event):
@@ -80,7 +89,10 @@ class EgcMpcSimulation:
             # Draw full global path (dashed line)
             x_path, y_path = state.get("global_path", ([], []))
             if x_path and y_path:
+                logging.info(f"[VIS] Robot {robot_id} global_path x: {x_path[:3]} y: {y_path[:3]} (len={len(x_path)})")
                 path.set_data(x_path, y_path)
+            else:
+                logging.info(f"[VIS] Robot {robot_id} global_path is empty or malformed → x: {x_path}, y: {y_path}")
 
             # Waypoints: show all intermediate points except start and goal
             if len(x_path) > 2:

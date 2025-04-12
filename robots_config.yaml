@@ -24,35 +24,5 @@ robots:
     max_vel: 2.0
     controller_frequency: 5
 
-  - start:
-      x: -25.0
-      y: 25.0
-    goal:
-      x: 25.0
-      y: -25.0
-    color: "green"
-    max_vel: 2.0
-    controller_frequency: 7
-
-  - start:
-      x: 20.0
-      y: 30.0
-    goal:
-      x: -20.0
-      y: -30.0
-    color: "orange"
-    max_vel: 2.0
-    controller_frequency: 11
-
-  - start:
-      x: -30.0
-      y: 15.0
-    goal:
-      x: 30.0
-      y: -15.0
-    color: "purple"
-    max_vel: 2.0
-    controller_frequency: 3
-
 
 
