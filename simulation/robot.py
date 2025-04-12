@@ -46,10 +46,11 @@ class Robot(threading.Thread):
 
             # Update position
             dt = 1.0 / self.controller_frequency
-            self.position[0] += velocity * np.cos(theta) * dt
-            self.position[1] += velocity * np.sin(theta) * dt
-            self.velocity = np.array([velocity * np.cos(theta), velocity * np.sin(theta)])
             self.theta += theta * dt
+            self.position[0] += velocity * np.cos(self.theta) * dt
+            self.position[1] += velocity * np.sin(self.theta) * dt
+            self.velocity = np.array([velocity * np.cos(self.theta), velocity * np.sin(self.theta)])
+            
 
             # Update trajectory
             self.x_traj.append(self.position[0])

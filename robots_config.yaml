@@ -6,14 +6,84 @@ robot_dim:
 robots:
   # North → South
   - start:
-      x: 0
-      y: 0
+      x: -10.0
+      y: 30.0
     goal:
-      x: 20
-      y: 20
+      x: -10.0
+      y: -30.0
     color: "blue"
     max_vel: 1.7
     controller_frequency: 13
 
+  - start:
+      x: 10.0
+      y: 30.0
+    goal:
+      x: 10.0
+      y: -30.0
+    color: "red"
+    max_vel: 0.9
+    controller_frequency: 6
 
-  
+  # South → North
+  - start:
+      x: -20.0
+      y: -30.0
+    goal:
+      x: -20.0
+      y: 30.0
+    color: "green"
+    max_vel: 1.3
+    controller_frequency: 9
+
+  - start:
+      x: 20.0
+      y: -30.0
+    goal:
+      x: 20.0
+      y: 30.0
+    color: "orange"
+    max_vel: 1.0
+    controller_frequency: 3
+
+  # East → West
+  - start:
+      x: 30.0
+      y: -15.0
+    goal:
+      x: -30.0
+      y: -15.0
+    color: "purple"
+    max_vel: 1.9
+    controller_frequency: 14
+
+  - start:
+      x: 30.0
+      y: 15.0
+    goal:
+      x: -30.0
+      y: 15.0
+    color: "magenta"
+    max_vel: 1.2
+    controller_frequency: 5
+
+  # West → East
+  - start:
+      x: -30.0
+      y: -10.0
+    goal:
+      x: 30.0
+      y: -10.0
+    color: "cyan"
+    max_vel: 0.8
+    controller_frequency: 11
+
+  - start:
+      x: -30.0
+      y: 10.0
+    goal:
+      x: 30.0
+      y: 10.0
+    color: "brown"
+    max_vel: 1.6
+    controller_frequency: 8

@@ -13,7 +13,7 @@ logging.basicConfig(
 )
 
 class PointRobotMPC:
-    def __init__(self, dt=0.1, N=15):
+    def __init__(self, dt=0.1, N=20):
         self.dt = dt
         self.N = N
         self.v_max = 2.0
