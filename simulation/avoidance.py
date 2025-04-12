@@ -404,6 +404,38 @@ class CollisionAvoidance:
 
         return intersections
 
+    def filter_non_progressive_xpoints(self, path, goal):
+        """
+        Filters intermediate points where x-distance to the goal does not decrease.
+
+        Parameters:
+            path (List[Tuple[float, float]]): Complete path [start, ..., goal]
+            goal (Tuple[float, float]): Robot's goal position
+
+        Returns:
+            List[Tuple[float, float]]: Filtered path with only improving x-distance to goal
+        """
+        if len(path) <= 3:
+            return path  # No meaningful intermediates to filter
+
+        goal_x = goal[0]
+        filtered = [path[1]]  # First intermediate (skip start)
+
+        last_x_dist = abs(path[1][0] - goal_x)
+
+        for pt in path[2:-1]:  # Remaining intermediates (excluding goal)
+            x_dist = abs(pt[0] - goal_x)
+            if x_dist <= last_x_dist + 1e-3:  # Allow small tolerance
+                filtered.append(pt)
+                last_x_dist = x_dist
+            else:
+                self.logger.info(
+                    f"[FILTER] Discarding {pt} — x-distance to goal increased ({x_dist:.2f} > {last_x_dist:.2f})"
+                )
+
+        return [path[0]] + filtered + [path[-1]]
+
+
 
     def plan(self, robot, other_robots):
         self.logger.info(f"[PLAN] Starting path planning at pos {robot.position} to goal {robot.goal}")
@@ -454,6 +486,9 @@ class CollisionAvoidance:
         full_path_x.append(goal_pos[0])
         full_path_y.append(goal_pos[1])
         full_path = list(zip(full_path_x, full_path_y))
+        full_path = self.filter_non_progressive_xpoints(full_path, goal_pos)
+        full_path_x = [pt[0] for pt in full_path]
+        full_path_y = [pt[1] for pt in full_path]
         self.logger.info(f"[PATH] Robot {robot.robot_id}: planned path with {len(full_path)} points → {full_path}")
 
 
